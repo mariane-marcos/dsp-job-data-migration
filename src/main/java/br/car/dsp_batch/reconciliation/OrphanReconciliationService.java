@@ -57,7 +57,7 @@ public class OrphanReconciliationService {
     public List<String> reconcileOrphans(JdbcTemplate geoTargetJdbc,
                                          JdbcTemplate businessTargetJdbc,
                                          WatermarkTableSpec spec,
-                                         Collection<Object> orphanIds,
+                                         Collection<?> orphanIds,
                                          Map<Object, String> bboxesById,
                                          ExecutionContext jobContext) {
         if (orphanIds == null || orphanIds.isEmpty()) {

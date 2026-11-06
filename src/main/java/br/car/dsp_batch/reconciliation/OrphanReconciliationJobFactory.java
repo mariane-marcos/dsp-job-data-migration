@@ -112,7 +112,8 @@ public class OrphanReconciliationJobFactory {
                 geoTargetDataSource,
                 stepPrefix,
                 spec);
-        Partitioner partitioner = new GeoTargetReconciliationPartitioner();
+        Partitioner partitioner = new GeoTargetReconciliationPartitioner(
+                new JdbcTemplate(geoTargetDataSource), spec);
 
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
         handler.setStep(workerStep);
@@ -160,7 +161,7 @@ public class OrphanReconciliationJobFactory {
                 reconciliationService,
                 originProbe,
                 properties,
-                OrphanReconciliationWorkerTasklet.hashBucket(stepContext),
-                OrphanReconciliationWorkerTasklet.hashGridSize(stepContext));
+                OrphanReconciliationWorkerTasklet.rangeStart(stepContext),
+                OrphanReconciliationWorkerTasklet.rangeEnd(stepContext));
     }
 }

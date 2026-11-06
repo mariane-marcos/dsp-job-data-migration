@@ -58,6 +58,7 @@ class WatermarkChangeDetectionEngineTest {
                 "geom",
                 "dsp.l1",
                 "id",
+                null,
                 null
         );
 

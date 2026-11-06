@@ -79,7 +79,7 @@ public class ChangeDetectionTasklet implements Tasklet {
                 sourceJdbc,
                 geoTargetJdbc,
                 targetJdbc,
-                WatermarkTableSpecs.fromJobTableConfig(tableConfig, temporalColumns),
+                WatermarkTableSpecs.fromJobTableConfig(tableConfig, temporalColumns, null),
                 chunkContext
         );
         return RepeatStatus.FINISHED;

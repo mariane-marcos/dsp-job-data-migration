@@ -2,6 +2,7 @@ package br.car.dsp_batch.reconciliation;
 
 import br.car.dsp_batch.batch.config.JobTableConfig;
 import br.car.dsp_batch.batch.config.JobTableConfigValidator;
+import br.car.dsp_batch.layer.metadata.QualifiedTable;
 import br.car.dsp_batch.sync.WatermarkTableSpec;
 import br.car.dsp_batch.sync.WatermarkTableSpecs;
 import br.car.dsp_batch.temporal.BatchTemporalProperties;
@@ -11,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import javax.sql.DataSource;
+import java.util.List;
 
 @Component
 public class ReconciliationTableSpecResolver {
@@ -34,6 +36,29 @@ public class ReconciliationTableSpecResolver {
                 batchTemporalProperties.resolvePolicy(
                         tableConfig.getSourceTimezone(),
                         "batch.*.source-timezone for " + tableConfig.getSourceTable()));
-        return WatermarkTableSpecs.fromJobTableConfig(tableConfig, temporalColumns);
+        String sourcePkUdt = requireSourcePkUdt(
+                new JdbcTemplate(sourceDataSource),
+                tableConfig.getSourceTable(),
+                tableConfig.getPrimaryKey());
+        return WatermarkTableSpecs.fromJobTableConfig(tableConfig, temporalColumns, sourcePkUdt);
+    }
+
+    static String requireSourcePkUdt(JdbcTemplate jdbc, String qualifiedTable, String column) {
+        QualifiedTable table = QualifiedTable.parse(qualifiedTable);
+        List<String> udts = jdbc.query(
+                """
+                SELECT udt_name
+                FROM information_schema.columns
+                WHERE table_schema = ? AND table_name = ? AND column_name = ?
+                """,
+                (rs, rowNum) -> rs.getString("udt_name"),
+                table.schema(),
+                table.table(),
+                column);
+        if (udts.isEmpty() || udts.getFirst() == null || udts.getFirst().isBlank()) {
+            throw new IllegalStateException(
+                    "Source PK column " + column + " not found on " + qualifiedTable);
+        }
+        return udts.getFirst();
     }
 }

@@ -30,8 +30,8 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
     private final OrphanReconciliationService reconciliationService;
     private final OrphanOriginProbe originProbe;
     private final ReconciliationProperties properties;
-    private final Integer hashBucket;
-    private final Integer hashGridSize;
+    private final String rangeStartExclusive;
+    private final String rangeEndInclusive;
 
     public OrphanReconciliationWorkerTasklet(JdbcTemplate sourceJdbc,
                                              JdbcTemplate businessTargetJdbc,
@@ -40,8 +40,8 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
                                              OrphanReconciliationService reconciliationService,
                                              OrphanOriginProbe originProbe,
                                              ReconciliationProperties properties,
-                                             Integer hashBucket,
-                                             Integer hashGridSize) {
+                                             String rangeStartExclusive,
+                                             String rangeEndInclusive) {
         this.sourceJdbc = sourceJdbc;
         this.businessTargetJdbc = businessTargetJdbc;
         this.geoTargetJdbc = geoTargetJdbc;
@@ -49,8 +49,8 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
         this.reconciliationService = reconciliationService;
         this.originProbe = originProbe;
         this.properties = properties;
-        this.hashBucket = hashBucket;
-        this.hashGridSize = hashGridSize;
+        this.rangeStartExclusive = rangeStartExclusive;
+        this.rangeEndInclusive = rangeEndInclusive;
     }
 
     @Override
@@ -61,35 +61,38 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
                 .getExecutionContext();
 
         GeoTargetOrphanBatchReader reader = new GeoTargetOrphanBatchReader(
-                geoTargetJdbc, spec, hashBucket, hashGridSize);
+                geoTargetJdbc, spec, rangeEndInclusive);
 
-        Object lastKey = null;
+        String lastKey = rangeStartExclusive;
         int batchSize = properties.getBatchSize();
         int totalOrphans = 0;
 
         while (true) {
-            List<GeoTargetOrphanBatchReader.TargetRow> batch = reader.fetchNextBatch(lastKey, batchSize);
+            List<String> batch = reader.fetchNextBatch(lastKey, batchSize);
             if (batch.isEmpty()) {
                 break;
             }
 
-            List<Object> candidateIds = batch.stream()
-                    .map(GeoTargetOrphanBatchReader.TargetRow::rawId)
-                    .toList();
             Set<Object> existingOnSource = originProbe.probeExistingNormalizedIds(
-                    sourceJdbc, spec, candidateIds);
+                    sourceJdbc, spec, batch);
 
-            List<Object> orphanIds = new ArrayList<>();
-            Map<Object, String> bboxesById = new HashMap<>();
-            for (GeoTargetOrphanBatchReader.TargetRow row : batch) {
-                Object normalized = reconciliationService.normalizeId(row.rawId());
+            List<String> orphanIds = new ArrayList<>();
+            for (String rawId : batch) {
+                Object normalized = reconciliationService.normalizeId(rawId);
                 if (!existingOnSource.contains(normalized)) {
-                    orphanIds.add(row.rawId());
-                    bboxesById.put(normalized, row.bbox());
+                    orphanIds.add(rawId);
                 }
             }
 
             if (!orphanIds.isEmpty()) {
+                Map<String, String> fetched = reader.fetchBboxes(orphanIds);
+                Map<Object, String> bboxesById = new HashMap<>();
+                for (String rawId : orphanIds) {
+                    String bbox = fetched.get(rawId);
+                    if (bbox != null) {
+                        bboxesById.put(reconciliationService.normalizeId(rawId), bbox);
+                    }
+                }
                 reconciliationService.reconcileOrphans(
                         geoTargetJdbc,
                         businessTargetJdbc,
@@ -100,22 +103,22 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
                 totalOrphans += orphanIds.size();
             }
 
-            lastKey = batch.get(batch.size() - 1).rawId();
+            lastKey = batch.get(batch.size() - 1);
         }
 
         log.info("Reconciliation worker for syncKey={} removed {} orphan(s)", spec.syncKey(), totalOrphans);
         return RepeatStatus.FINISHED;
     }
 
-    public static Integer hashBucket(ExecutionContext stepContext) {
-        return stepContext.containsKey(GeoTargetReconciliationPartitioner.HASH_BUCKET)
-                ? stepContext.getInt(GeoTargetReconciliationPartitioner.HASH_BUCKET)
+    public static String rangeStart(ExecutionContext stepContext) {
+        return stepContext.containsKey(GeoTargetReconciliationPartitioner.RANGE_START)
+                ? stepContext.getString(GeoTargetReconciliationPartitioner.RANGE_START)
                 : null;
     }
 
-    public static Integer hashGridSize(ExecutionContext stepContext) {
-        return stepContext.containsKey(GeoTargetReconciliationPartitioner.HASH_GRID_SIZE)
-                ? stepContext.getInt(GeoTargetReconciliationPartitioner.HASH_GRID_SIZE)
+    public static String rangeEnd(ExecutionContext stepContext) {
+        return stepContext.containsKey(GeoTargetReconciliationPartitioner.RANGE_END)
+                ? stepContext.getString(GeoTargetReconciliationPartitioner.RANGE_END)
                 : null;
     }
 }

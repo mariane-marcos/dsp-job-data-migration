@@ -1,6 +1,5 @@
 package br.car.dsp_batch.reconciliation.tasklet;
 
-import br.car.dsp_batch.geometry.GeometrySql;
 import br.car.dsp_batch.reconciliation.ReconciliationProperties;
 import br.car.dsp_batch.sync.ReconciliationContextKeys;
 import br.car.dsp_batch.sync.WatermarkContextKeys;
@@ -49,7 +48,7 @@ public class ReconciliationSetupTasklet implements Tasklet {
         }
 
         long rowCount = countGeoTargetRows();
-        log.info("Reconciliation setup for syncKey={} geo-target rows with valid geom={}",
+        log.info("Reconciliation setup for syncKey={} geo-target rows={}",
                 spec.syncKey(), rowCount);
 
         boolean targetEmpty = rowCount == 0;
@@ -61,13 +60,8 @@ public class ReconciliationSetupTasklet implements Tasklet {
     }
 
     private long countGeoTargetRows() {
-        String geom = spec.geoTargetGeometryColumn();
-        String validGeom = GeometrySql.validNonEmptyPredicate(geom);
-        String sql = String.format(
-                "SELECT COUNT(*) FROM %s WHERE %s",
-                spec.geoTargetTable(),
-                validGeom);
-        Long count = geoTargetJdbc.queryForObject(sql, Long.class);
+        Long count = geoTargetJdbc.queryForObject(
+                "SELECT COUNT(*) FROM " + spec.geoTargetTable(), Long.class);
         return count == null ? 0L : count;
     }
 }

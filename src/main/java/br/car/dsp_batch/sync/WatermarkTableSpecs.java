@@ -3,8 +3,11 @@ package br.car.dsp_batch.sync;
 import br.car.dsp_batch.aoi.config.AreaOfInterestConfig;
 import br.car.dsp_batch.aoi.metadata.AreaOfInterestTableMetadata;
 import br.car.dsp_batch.batch.config.JobTableConfig;
+import br.car.dsp_batch.layer.metadata.ColumnMetadata;
 import br.car.dsp_batch.layer.metadata.LayerTableMetadata;
 import br.car.dsp_batch.temporal.TemporalColumnSpecs;
+
+import java.util.List;
 /**
  * Factories that build {@link WatermarkTableSpec} from domain contracts.
  */
@@ -14,7 +17,8 @@ public final class WatermarkTableSpecs {
     }
 
     public static WatermarkTableSpec fromJobTableConfig(JobTableConfig tableConfig,
-                                                        TemporalColumnSpecs temporalColumns) {
+                                                        TemporalColumnSpecs temporalColumns,
+                                                        String sourcePrimaryKeyUdtName) {
         String syncKey = tableConfig.getSyncKey();
         if (syncKey == null || syncKey.isBlank()) {
             throw new IllegalArgumentException(
@@ -45,7 +49,8 @@ public final class WatermarkTableSpecs {
                 targetGeom,
                 tableConfig.getTargetTable(),
                 targetPk,
-                null
+                null,
+                sourcePrimaryKeyUdtName
         );
     }
 
@@ -65,7 +70,11 @@ public final class WatermarkTableSpecs {
                 metadata.resolveTargetGeometryColumn(),
                 metadata.qualifiedTargetTable(),
                 metadata.resolveTargetPrimaryKeyColumn(),
-                AreaOfInterestConfig.TERRITORY_LEVEL_3_ID_COLUMN
+                AreaOfInterestConfig.TERRITORY_LEVEL_3_ID_COLUMN,
+                requireSourcePkUdt(
+                        metadata.columns(),
+                        metadata.primaryKeyColumn(),
+                        metadata.qualifiedSourceTable())
         );
     }
 
@@ -85,7 +94,25 @@ public final class WatermarkTableSpecs {
                 metadata.resolveTargetGeometryColumn(),
                 null,
                 null,
-                null
+                null,
+                requireSourcePkUdt(
+                        metadata.columns(),
+                        metadata.primaryKeyColumn(),
+                        metadata.qualifiedSourceTable())
         );
+    }
+
+    private static String requireSourcePkUdt(List<ColumnMetadata> columns, String primaryKey, String table) {
+        if (columns != null) {
+            for (ColumnMetadata column : columns) {
+                if (primaryKey.equals(column.name())
+                        && column.udtName() != null
+                        && !column.udtName().isBlank()) {
+                    return column.udtName();
+                }
+            }
+        }
+        throw new IllegalStateException(
+                "Source PK column " + primaryKey + " has no type on " + table);
     }
 }

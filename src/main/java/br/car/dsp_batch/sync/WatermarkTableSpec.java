@@ -26,7 +26,12 @@ public record WatermarkTableSpec(
          * When set, orphan deletion records distinct values of this column (e.g.
          * {@code territory_level_3_id}) into {@link WatermarkContextKeys#DEPARTED_LEVEL_3_IDS}.
          */
-        String geoTargetDepartedTerritoryColumn
+        String geoTargetDepartedTerritoryColumn,
+        /**
+         * PostgreSQL {@code udt_name} of the source primary key ({@code int4}, {@code int8},
+         * {@code varchar}, …). Null on change-detection specs that never probe orphans.
+         */
+        String sourcePrimaryKeyUdtName
 ) {
     public String sourceCreationDateColumn() {
         return creationDateColumn.sourceColumn();

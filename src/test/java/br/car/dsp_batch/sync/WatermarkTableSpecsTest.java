@@ -36,7 +36,7 @@ class WatermarkTableSpecsTest {
         TemporalColumnSpecs temporalColumns = TemporalColumnSpecs.of(
                 TemporalTestFixtures.timestamptz("source_created_at"),
                 TemporalTestFixtures.timestamptz("source_updated_at"));
-        WatermarkTableSpec spec = WatermarkTableSpecs.fromJobTableConfig(config, temporalColumns);
+        WatermarkTableSpec spec = WatermarkTableSpecs.fromJobTableConfig(config, temporalColumns, null);
 
         assertEquals(SyncKeys.ADMIN_UNIT_LEVEL_1, spec.syncKey());
         assertEquals("source_created_at", spec.sourceCreationDateColumn());
@@ -45,6 +45,7 @@ class WatermarkTableSpecsTest {
         assertEquals("target.l1", spec.businessTargetTable());
         assertEquals("target_id", spec.geoTargetPrimaryKey());
         assertEquals("target_geom", spec.geoTargetGeometryColumn());
+        assertNull(spec.sourcePrimaryKeyUdtName());
     }
 
     @Test
@@ -55,7 +56,7 @@ class WatermarkTableSpecsTest {
 
         IllegalArgumentException ex = assertThrows(
                 IllegalArgumentException.class,
-                () -> WatermarkTableSpecs.fromJobTableConfig(config, null)
+                () -> WatermarkTableSpecs.fromJobTableConfig(config, null, null)
         );
         assertTrue(ex.getMessage().contains("creation-date-column"));
     }
@@ -84,5 +85,31 @@ class WatermarkTableSpecsTest {
         assertEquals("dsp_parcelas", spec.syncKey());
         assertEquals("dsp.parcelas", spec.geoTargetTable());
         assertNull(spec.businessTargetTable());
+        assertEquals("int8", spec.sourcePrimaryKeyUdtName());
+    }
+
+    @Test
+    void fromLayerMetadata_RequiresPkType() {
+        LayerTableMetadata metadata = new LayerTableMetadata(
+                "dsp_parcelas",
+                "parcelas",
+                new QualifiedTable("src", "parcelas"),
+                new QualifiedTable("dsp", "parcelas"),
+                "id",
+                "geom",
+                "aoi_fk",
+                TemporalTestFixtures.timestamptz("created_at"),
+                TemporalTestFixtures.timestamptz("updated_at"),
+                "nome",
+                4326,
+                List.of(),
+                List.of(),
+                "1=1"
+        );
+
+        IllegalStateException ex = assertThrows(
+                IllegalStateException.class,
+                () -> WatermarkTableSpecs.fromLayerMetadata(metadata));
+        assertTrue(ex.getMessage().contains("id"));
     }
 }

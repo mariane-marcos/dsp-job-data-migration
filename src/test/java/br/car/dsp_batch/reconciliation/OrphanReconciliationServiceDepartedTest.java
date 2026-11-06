@@ -184,6 +184,7 @@ class OrphanReconciliationServiceDepartedTest {
                 "geometry",
                 null,
                 null,
+                null,
                 null
         );
 
@@ -226,6 +227,7 @@ class OrphanReconciliationServiceDepartedTest {
                 "dsp.territory_level_3",
                 "id",
                 "geometry",
+                null,
                 null,
                 null,
                 null
@@ -303,7 +305,8 @@ class OrphanReconciliationServiceDepartedTest {
                 "geometry",
                 "dsp.area_of_interest",
                 "id",
-                "territory_level_3_id"
+                "territory_level_3_id",
+                null
         );
     }
 
