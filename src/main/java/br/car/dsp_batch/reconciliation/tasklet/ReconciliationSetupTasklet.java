@@ -1,6 +1,7 @@
 package br.car.dsp_batch.reconciliation.tasklet;
 
 import br.car.dsp_batch.reconciliation.ReconciliationProperties;
+import br.car.dsp_batch.sync.CycleAffectedExtent;
 import br.car.dsp_batch.sync.ReconciliationContextKeys;
 import br.car.dsp_batch.sync.WatermarkContextKeys;
 import br.car.dsp_batch.sync.WatermarkTableSpec;
@@ -20,13 +21,16 @@ public class ReconciliationSetupTasklet implements Tasklet {
     private final JdbcTemplate geoTargetJdbc;
     private final WatermarkTableSpec spec;
     private final ReconciliationProperties properties;
+    private final CycleAffectedExtent cycleAffectedExtent;
 
     public ReconciliationSetupTasklet(JdbcTemplate geoTargetJdbc,
                                       WatermarkTableSpec spec,
-                                      ReconciliationProperties properties) {
+                                      ReconciliationProperties properties,
+                                      CycleAffectedExtent cycleAffectedExtent) {
         this.geoTargetJdbc = geoTargetJdbc;
         this.spec = spec;
         this.properties = properties;
+        this.cycleAffectedExtent = cycleAffectedExtent;
     }
 
     @Override
@@ -45,6 +49,11 @@ public class ReconciliationSetupTasklet implements Tasklet {
         jobContext.put(ReconciliationContextKeys.ORPHAN_RECONCILIATION, true);
         if (spec.layerName() != null) {
             jobContext.putString(WatermarkContextKeys.LAYER_NAME, spec.layerName());
+        }
+        // Reconciliation is a later job; the delta extent lives on this process.
+        String deltaExtent = cycleAffectedExtent.get(spec.syncKey());
+        if (deltaExtent != null && !deltaExtent.isBlank()) {
+            jobContext.putString(WatermarkContextKeys.AFFECTED_EXTENT, deltaExtent);
         }
 
         long rowCount = countGeoTargetRows();

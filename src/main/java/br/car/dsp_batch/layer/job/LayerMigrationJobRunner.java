@@ -1,5 +1,6 @@
 package br.car.dsp_batch.layer.job;
 
+import br.car.dsp_batch.batch.config.JobRunGuard;
 import br.car.dsp_batch.layer.config.LayerConfig;
 import br.car.dsp_batch.layer.config.LayersProperties;
 import lombok.extern.slf4j.Slf4j;
@@ -96,5 +97,6 @@ public class LayerMigrationJobRunner implements CommandLineRunner {
                     step.getCommitCount()
             );
         }
+        JobRunGuard.requireCompleted(job.getName(), execution);
     }
 }

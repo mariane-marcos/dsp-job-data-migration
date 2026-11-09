@@ -2,6 +2,7 @@ package br.car.dsp_batch.layer.job;
 
 import br.car.dsp_batch.batch.config.ChangeDecider;
 import br.car.dsp_batch.batch.config.ParallelizationConfig;
+import br.car.dsp_batch.batch.listener.GeoCacheUpdateListener;
 import br.car.dsp_batch.batch.listener.ParallelizationMonitorListener;
 import br.car.dsp_batch.layer.config.LayerConfig;
 import br.car.dsp_batch.layer.ddl.LayerTableDdlBuilder;
@@ -59,6 +60,7 @@ public class LayerMigrationJobFactory {
     private final ItemReader<LayerFeatureRecord> layerFeatureReader;
     private final ItemWriter<LayerFeatureRecord> layerFeatureWriter;
     private final GeoFileRegenerationFlagListener geoFileRegenerationFlagListener;
+    private final GeoCacheUpdateListener geoCacheUpdateListener;
 
     public LayerMigrationJobFactory(
             JobRepository jobRepository,
@@ -76,7 +78,8 @@ public class LayerMigrationJobFactory {
             ParallelizationMonitorListener parallelizationMonitorListener,
             @Qualifier("layerFeatureReader") ItemReader<LayerFeatureRecord> layerFeatureReader,
             @Qualifier("layerFeatureWriter") ItemWriter<LayerFeatureRecord> layerFeatureWriter,
-            GeoFileRegenerationFlagListener geoFileRegenerationFlagListener) {
+            GeoFileRegenerationFlagListener geoFileRegenerationFlagListener,
+            GeoCacheUpdateListener geoCacheUpdateListener) {
         this.jobRepository = jobRepository;
         this.transactionManager = transactionManager;
         this.sourceDataSource = sourceDataSource;
@@ -93,6 +96,7 @@ public class LayerMigrationJobFactory {
         this.layerFeatureReader = layerFeatureReader;
         this.layerFeatureWriter = layerFeatureWriter;
         this.geoFileRegenerationFlagListener = geoFileRegenerationFlagListener;
+        this.geoCacheUpdateListener = geoCacheUpdateListener;
     }
 
     public Job createJob(LayerConfig config) {
@@ -107,6 +111,7 @@ public class LayerMigrationJobFactory {
         return new JobBuilder(jobName, jobRepository)
                 .listener(watermarkCommitListener)
                 .listener(geoFileRegenerationFlagListener)
+                .listener(geoCacheUpdateListener)
                 .start(setupStep)
                 .next(changeDetectionStep)
                 .next(changeDecider)

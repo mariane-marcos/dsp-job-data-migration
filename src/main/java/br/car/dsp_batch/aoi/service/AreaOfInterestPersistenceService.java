@@ -48,7 +48,7 @@ public class AreaOfInterestPersistenceService {
         List<LayerFeatureRecord> validItems = new ArrayList<>();
         int skippedWithoutGeometry = 0;
         for (LayerFeatureRecord item : items) {
-            if (item.getGeometryGeoJson() != null && !item.getGeometryGeoJson().isBlank()) {
+            if (item.getGeometryEwkb() != null && item.getGeometryEwkb().length > 0) {
                 validItems.add(item);
             } else {
                 skippedWithoutGeometry++;
@@ -80,7 +80,6 @@ public class AreaOfInterestPersistenceService {
                                       AreaOfInterestTableMetadata metadata) {
         List<String> targetColumns = metadata.targetNonGeometryColumnNames();
         String targetPk = metadata.resolveTargetPrimaryKeyColumn();
-        int srid = metadata.srid();
 
         Map<String, String> udtBySource = udtBySourceColumn(metadata);
 
@@ -88,9 +87,6 @@ public class AreaOfInterestPersistenceService {
                 + ", " + AreaOfInterestTableDdlBuilder.BOUNDARY_BOX_COLUMN
                 + ", " + AreaOfInterestTableDdlBuilder.CENTROID_COLUMN;
         String placeholders = targetColumns.stream().map(c -> "?").collect(Collectors.joining(", "));
-        String geomExpr = GeometrySql.geomFromGeoJsonParam2d(srid);
-        String boundaryPlaceholder = "public.ST_Envelope(" + geomExpr + ")";
-        String centroidPlaceholder = "public.ST_Centroid(" + geomExpr + ")";
 
         String updateSet = targetColumns.stream()
                 .filter(col -> !col.equals(targetPk))
@@ -103,12 +99,11 @@ public class AreaOfInterestPersistenceService {
         updateSet = updateSet.isEmpty() ? geoUpdate : updateSet + ", " + geoUpdate;
 
         String sql = String.format(
-                "INSERT INTO %s (%s) VALUES (%s, %s, %s) ON CONFLICT (%s) DO UPDATE SET %s",
+                "INSERT INTO %s (%s) SELECT %s, %s ON CONFLICT (%s) DO UPDATE SET %s",
                 metadata.qualifiedTargetTable(),
                 insertColumns,
                 placeholders,
-                boundaryPlaceholder,
-                centroidPlaceholder,
+                GeometrySql.envelopeAndCentroidFromEwkb(),
                 targetPk,
                 updateSet
         );
@@ -119,8 +114,7 @@ public class AreaOfInterestPersistenceService {
                 for (String targetColumn : targetColumns) {
                     index = bindAttribute(ps, index, item, metadata, targetColumn, udtBySource);
                 }
-                ps.setString(index++, item.getGeometryGeoJson());
-                ps.setString(index, item.getGeometryGeoJson());
+                ps.setBytes(index, item.getGeometryEwkb());
             });
         } catch (DataAccessException e) {
             log.error("Critical failure during business-target AOI UPSERT for {}",
@@ -137,13 +131,12 @@ public class AreaOfInterestPersistenceService {
         List<String> targetColumns = metadata.targetGeoNonGeometryColumnNames();
         String targetPk = metadata.resolveTargetPrimaryKeyColumn();
         String geom = metadata.resolveTargetGeometryColumn();
-        int srid = metadata.srid();
 
         Map<String, String> udtBySource = udtBySourceColumn(metadata);
 
         String insertColumns = String.join(", ", targetColumns) + ", " + geom;
         String placeholders = targetColumns.stream().map(c -> "?").collect(Collectors.joining(", "));
-        String geometryPlaceholder = GeometrySql.geomFromGeoJsonParam2d(srid);
+        String geometryPlaceholder = GeometrySql.multiGeomFromEwkbParam();
 
         String updateSet = targetColumns.stream()
                 .filter(col -> !col.equals(targetPk))
@@ -169,7 +162,7 @@ public class AreaOfInterestPersistenceService {
                 for (String targetColumn : targetColumns) {
                     index = bindAttribute(ps, index, item, metadata, targetColumn, udtBySource);
                 }
-                ps.setString(index, item.getGeometryGeoJson());
+                ps.setBytes(index, item.getGeometryEwkb());
             });
         } catch (DataAccessException e) {
             log.error("Critical failure during geo-target AOI UPSERT for {}",

@@ -6,14 +6,13 @@ import br.car.dsp_batch.temporal.WatermarkTemporalBridge;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.stereotype.Service;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Shared engine for incremental watermark change detection (delta only).
@@ -24,9 +23,12 @@ import java.util.concurrent.atomic.AtomicReference;
 public class WatermarkChangeDetectionEngine {
 
     private final SyncStateRepository syncStateRepository;
+    private final CycleAffectedExtent cycleAffectedExtent;
 
-    public WatermarkChangeDetectionEngine(SyncStateRepository syncStateRepository) {
+    public WatermarkChangeDetectionEngine(SyncStateRepository syncStateRepository,
+                                          CycleAffectedExtent cycleAffectedExtent) {
         this.syncStateRepository = syncStateRepository;
+        this.cycleAffectedExtent = cycleAffectedExtent;
     }
 
     public void detectChanges(JdbcTemplate sourceJdbc,
@@ -42,8 +44,10 @@ public class WatermarkChangeDetectionEngine {
         Optional<SyncState> state = syncStateRepository.findBySyncKey(spec.syncKey());
         Instant watermark = state.map(SyncState::watermarkLastEventAt).orElse(null);
 
-        List<String> deltaBboxes = new ArrayList<>();
-        Instant maxLastEventAt = collectDeltaBboxes(sourceJdbc, spec, watermark, deltaBboxes);
+        DeltaAggregate delta = collectDelta(sourceJdbc, spec, watermark);
+        if (delta == null) {
+            delta = new DeltaAggregate(0, null, null);
+        }
 
         var jobContext = chunkContext.getStepContext()
                 .getStepExecution()
@@ -57,33 +61,43 @@ public class WatermarkChangeDetectionEngine {
             jobContext.putString(WatermarkContextKeys.PREVIOUS_WATERMARK, watermark.toString());
         }
 
-        if (maxLastEventAt != null) {
-            jobContext.putString(WatermarkContextKeys.PROPOSED_WATERMARK, maxLastEventAt.toString());
+        if (delta.maxEventAt() != null) {
+            jobContext.putString(WatermarkContextKeys.PROPOSED_WATERMARK, delta.maxEventAt().toString());
         }
 
-        boolean hasDelta = !deltaBboxes.isEmpty();
-        if (!hasDelta) {
+        cycleAffectedExtent.replace(spec.syncKey(), delta.extent());
+        if (delta.count() == 0) {
             log.info("No changes detected in {} (watermark={})", spec.sourceTable(), watermark);
             jobContext.put(WatermarkContextKeys.HAS_CHANGES, false);
-        } else {
-            log.info("Detected {} delta areas in {} (watermark={}, proposed={})",
-                    deltaBboxes.size(), spec.sourceTable(), watermark, maxLastEventAt);
-            jobContext.put(WatermarkContextKeys.HAS_CHANGES, true);
-            jobContext.put(WatermarkContextKeys.AFFECTED_BBOXES, deltaBboxes);
-            jobContext.put(WatermarkContextKeys.LAYER_NAME, spec.layerName());
+            return;
+        }
+
+        log.info("Detected {} changed record(s) in {} (watermark={}, proposed={}, extent={})",
+                delta.count(), spec.sourceTable(), watermark, delta.maxEventAt(), delta.extent());
+        jobContext.put(WatermarkContextKeys.HAS_CHANGES, true);
+        if (delta.extent() != null) {
+            jobContext.putString(WatermarkContextKeys.AFFECTED_EXTENT, delta.extent());
+        }
+        if (spec.layerName() != null) {
+            jobContext.putString(WatermarkContextKeys.LAYER_NAME, spec.layerName());
         }
     }
 
-    Instant collectDeltaBboxes(JdbcTemplate sourceJdbc,
-                               WatermarkTableSpec spec,
-                               Instant watermark,
-                               List<String> bboxes) {
-        String pk = spec.sourcePrimaryKey();
+    DeltaAggregate collectDelta(JdbcTemplate sourceJdbc, WatermarkTableSpec spec, Instant watermark) {
+        String sql = deltaAggregateSql(spec, watermark);
+        DeltaAggregate delta = sourceJdbc.query(sql, (ResultSetExtractor<DeltaAggregate>) rs -> readDelta(rs, spec));
+        if (delta == null) {
+            return new DeltaAggregate(0, null, null);
+        }
+        log.info("Source delta: {} record(s) after watermark {}", delta.count(), watermark);
+        return delta;
+    }
+
+    static String deltaAggregateSql(WatermarkTableSpec spec, Instant watermark) {
         String geom = spec.sourceGeometryColumn();
         String creationDate = spec.sourceCreationDateColumn();
         String updatedAt = spec.sourceUpdatedAtColumn();
         String table = spec.sourceTable();
-        int srid = spec.srid();
 
         String validGeomFilter = GeometrySql.validNonEmptyPredicate(geom);
         String configWhere = spec.whereClause();
@@ -99,53 +113,46 @@ public class WatermarkChangeDetectionEngine {
             where.append(" AND (").append(configWhere).append(")");
         }
 
-        String geom2d = GeometrySql.force2d(geom);
-        String innerSelectColumns = pk + ", " + creationDate + " AS feature_created_at";
-        String outerSelectColumns = pk + ", feature_created_at";
+        String geom3857 = GeometrySql.inWebMercator(geom, spec.srid());
+        String innerColumns = creationDate + " AS feature_created_at, " + geom3857 + " AS g3857";
+        String aggregateColumns = "COUNT(*) AS delta_count, MAX(feature_created_at) AS max_created_at, "
+                + "ST_Extent(g3857) AS ext";
+        String outerColumns = "delta_count, max_created_at, "
+                + "ST_XMin(ext) AS minx, ST_YMin(ext) AS miny, ST_XMax(ext) AS maxx, ST_YMax(ext) AS maxy";
         if (updatedAt != null) {
-            innerSelectColumns += ", " + updatedAt + " AS feature_updated_at";
-            outerSelectColumns += ", feature_updated_at";
+            innerColumns = creationDate + " AS feature_created_at, " + updatedAt
+                    + " AS feature_updated_at, " + geom3857 + " AS g3857";
+            aggregateColumns = "COUNT(*) AS delta_count, MAX(feature_created_at) AS max_created_at, "
+                    + "MAX(feature_updated_at) AS max_updated_at, ST_Extent(g3857) AS ext";
+            outerColumns = "delta_count, max_created_at, max_updated_at, "
+                    + "ST_XMin(ext) AS minx, ST_YMin(ext) AS miny, ST_XMax(ext) AS maxx, ST_YMax(ext) AS maxy";
         }
-        String sql = String.format(
-                "SELECT %s, "
-                        + "ST_XMin(env3857) as minx, "
-                        + "ST_YMin(env3857) as miny, "
-                        + "ST_XMax(env3857) as maxx, "
-                        + "ST_YMax(env3857) as maxy "
-                        + "FROM ("
-                        + "  SELECT %s, "
-                        + "  ST_Transform(ST_Envelope(ST_SetSRID(%s, %d)), 3857) as env3857 "
-                        + "  FROM %s %s"
-                        + ") t",
-                outerSelectColumns,
-                innerSelectColumns,
-                geom2d,
-                srid,
-                table,
-                where
-        );
 
-        AtomicReference<Instant> maxLastEventAt = new AtomicReference<>();
-        sourceJdbc.query(sql, rs -> {
-            Instant creationInstant = WatermarkTemporalBridge.readInstant(
-                    rs, "feature_created_at", spec.creationDateColumn());
-            Instant updatedInstant = updatedAt == null ? null : WatermarkTemporalBridge.readInstant(
-                    rs, "feature_updated_at", spec.updatedAtColumn());
-            Instant eventInstant = WatermarkTemporalBridge.maxEventInstant(
-                    creationInstant, updatedInstant);
-            if (eventInstant != null) {
-                maxLastEventAt.updateAndGet(current ->
-                        current == null || eventInstant.isAfter(current) ? eventInstant : current);
-            }
-            bboxes.add(formatBbox(
-                    rs.getDouble("minx"),
-                    rs.getDouble("miny"),
-                    rs.getDouble("maxx"),
-                    rs.getDouble("maxy")));
-        });
+        return "SELECT " + outerColumns
+                + " FROM (SELECT " + aggregateColumns
+                + " FROM (SELECT " + innerColumns
+                + " FROM " + table + " " + where
+                + ") delta) agg";
+    }
 
-        log.info("Source delta: {} record(s) after watermark {}", bboxes.size(), watermark);
-        return maxLastEventAt.get();
+    private static DeltaAggregate readDelta(ResultSet rs, WatermarkTableSpec spec) throws SQLException {
+        if (!rs.next()) {
+            return new DeltaAggregate(0, null, null);
+        }
+        long count = rs.getLong("delta_count");
+        Instant creationInstant = WatermarkTemporalBridge.readInstant(
+                rs, "max_created_at", spec.creationDateColumn());
+        Instant updatedInstant = spec.sourceUpdatedAtColumn() == null
+                ? null
+                : WatermarkTemporalBridge.readInstant(rs, "max_updated_at", spec.updatedAtColumn());
+        Instant maxEventAt = WatermarkTemporalBridge.maxEventInstant(creationInstant, updatedInstant);
+
+        String extent = null;
+        double minX = rs.getDouble("minx");
+        if (!rs.wasNull()) {
+            extent = AffectedExtent.format(minX, rs.getDouble("miny"), rs.getDouble("maxx"), rs.getDouble("maxy"));
+        }
+        return new DeltaAggregate(count, maxEventAt, extent);
     }
 
     private void logDateGranularityWarnings(WatermarkTableSpec spec) {
@@ -181,7 +188,6 @@ public class WatermarkChangeDetectionEngine {
         }
     }
 
-    private String formatBbox(double minX, double minY, double maxX, double maxY) {
-        return String.format(Locale.US, "%.6f,%.6f,%.6f,%.6f", minX, minY, maxX, maxY);
+    record DeltaAggregate(long count, Instant maxEventAt, String extent) {
     }
 }

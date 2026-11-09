@@ -1,6 +1,7 @@
 package br.car.dsp_batch.reconciliation;
 
 import br.car.dsp_batch.geometry.GeometrySql;
+import br.car.dsp_batch.sync.AffectedExtent;
 import br.car.dsp_batch.sync.WatermarkTableSpec;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -10,12 +11,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Keyset pages of geo-target primary keys, plus bbox lookup for ids that will be deleted.
+ * Keyset pages of geo-target primary keys, plus one extent for ids that will be deleted.
  * Destination primary keys are varchar, so the page compares the column as stored.
  */
 public class GeoTargetOrphanBatchReader {
@@ -61,48 +60,42 @@ public class GeoTargetOrphanBatchReader {
         return ids;
     }
 
-    public Map<String, String> fetchBboxes(Collection<String> rawIds) {
+    /**
+     * @return one EPSG:3857 extent covering the given ids, or null when none have a geometry
+     */
+    public String fetchExtent(Collection<String> rawIds) {
         if (rawIds == null || rawIds.isEmpty()) {
-            return Map.of();
+            return null;
         }
-        String sql = orphanBboxSql(spec);
+        String sql = extentSql(spec);
         Object[] values = rawIds.toArray();
-        return geoTargetJdbc.execute((ConnectionCallback<Map<String, String>>) connection -> {
+        return geoTargetJdbc.execute((ConnectionCallback<String>) connection -> {
             Array array = connection.createArrayOf("varchar", values);
-            Map<String, String> bboxes = new HashMap<>();
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
                 ReconciliationPrimaryKeySql.disableServerPrepare(statement);
                 statement.setArray(1, array);
                 try (ResultSet rs = statement.executeQuery()) {
-                    while (rs.next()) {
-                        String id = rs.getString(1);
-                        double minX = rs.getDouble(2);
-                        if (rs.wasNull()) {
-                            continue;
-                        }
-                        double minY = rs.getDouble(3);
-                        double maxX = rs.getDouble(4);
-                        double maxY = rs.getDouble(5);
-                        bboxes.put(id, OrphanReconciliationService.formatBbox(minX, minY, maxX, maxY));
+                    if (!rs.next()) {
+                        return null;
                     }
+                    double minX = rs.getDouble(1);
+                    if (rs.wasNull()) {
+                        return null;
+                    }
+                    return AffectedExtent.format(minX, rs.getDouble(2), rs.getDouble(3), rs.getDouble(4));
                 }
             } finally {
                 array.free();
             }
-            return bboxes;
         });
     }
 
-    static String orphanBboxSql(WatermarkTableSpec spec) {
+    static String extentSql(WatermarkTableSpec spec) {
         String pk = spec.geoTargetPrimaryKey();
-        String geom = spec.geoTargetGeometryColumn();
-        int srid = spec.srid();
-        String geom2d = GeometrySql.force2d(geom);
-        return "SELECT " + pk + ", "
-                + "ST_XMin(env3857), ST_YMin(env3857), ST_XMax(env3857), ST_YMax(env3857) "
-                + "FROM (SELECT " + pk + ", "
-                + "ST_Transform(ST_Envelope(ST_SetSRID(" + geom2d + ", " + srid + ")), 3857) AS env3857 "
+        String geom3857 = GeometrySql.inWebMercator(spec.geoTargetGeometryColumn(), spec.srid());
+        return "SELECT ST_XMin(ext), ST_YMin(ext), ST_XMax(ext), ST_YMax(ext) "
+                + "FROM (SELECT ST_Extent(" + geom3857 + ") AS ext "
                 + "FROM " + spec.geoTargetTable()
-                + " WHERE " + pk + " = ANY(?)) bbox_q";
+                + " WHERE " + pk + " = ANY(?)) agg";
     }
 }

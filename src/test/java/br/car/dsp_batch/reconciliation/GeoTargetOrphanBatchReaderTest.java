@@ -53,22 +53,24 @@ class GeoTargetOrphanBatchReaderTest {
     }
 
     @Test
-    void fetchBboxes_EmptyIdsSkipQuery() {
+    void fetchExtent_EmptyIdsSkipQuery() {
         JdbcTemplate geoTargetJdbc = mock(JdbcTemplate.class);
         GeoTargetOrphanBatchReader reader = new GeoTargetOrphanBatchReader(
                 geoTargetJdbc, sampleSpec(), null);
 
-        reader.fetchBboxes(List.of());
+        reader.fetchExtent(List.of());
 
         verify(geoTargetJdbc, never()).execute(any(ConnectionCallback.class));
     }
 
     @Test
-    void orphanBboxSql_LooksUpOnlyTheGivenIds() {
-        String sql = GeoTargetOrphanBatchReader.orphanBboxSql(sampleSpec());
+    void extentSql_LooksUpOnlyTheGivenIds() {
+        String sql = GeoTargetOrphanBatchReader.extentSql(sampleSpec());
         assertTrue(sql.contains("id = ANY(?)"));
-        assertTrue(sql.contains("ST_Envelope"));
+        assertTrue(sql.contains("ST_Extent"));
+        assertTrue(sql.contains("3857"));
         assertFalse(sql.contains("ST_MakeValid"));
+        assertFalse(sql.contains("ST_Envelope"));
         assertTrue(sql.contains("FROM dsp.territory_level_1"));
     }
 

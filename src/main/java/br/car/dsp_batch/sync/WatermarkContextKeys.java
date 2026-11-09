@@ -6,7 +6,11 @@ package br.car.dsp_batch.sync;
 public final class WatermarkContextKeys {
 
     public static final String HAS_CHANGES = "hasChanges";
-    public static final String AFFECTED_BBOXES = "affectedBboxes";
+    /**
+     * One box in EPSG:3857 ({@code minx,miny,maxx,maxy}) covering every changed
+     * or removed geometry of the run. Replaces the old per-record bbox list.
+     */
+    public static final String AFFECTED_EXTENT = "affectedExtent";
     public static final String LAYER_NAME = "layerName";
     public static final String PROPOSED_WATERMARK = "proposedWatermark";
     /**

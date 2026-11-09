@@ -60,8 +60,8 @@ public class LayerFeatureReader extends AbstractPartitionedPagingItemReader<Laye
         PostgresPagingQueryProvider queryProvider = new PostgresPagingQueryProvider();
         queryProvider.setSelectClause(
                 "SELECT " + selectColumns
-                        + ", " + GeometrySql.asGeoJsonText2d(transformedGeom)
-                        + " AS geometry_geo_json"
+                        + ", " + GeometrySql.asEwkb2d(transformedGeom)
+                        + " AS geometry_ewkb"
         );
         queryProvider.setFromClause("FROM " + metadata.qualifiedSourceTable());
 
@@ -117,7 +117,7 @@ public class LayerFeatureReader extends AbstractPartitionedPagingItemReader<Laye
         public LayerFeatureRecord mapRow(ResultSet rs, int rowNum) throws SQLException {
             LayerFeatureRecord record = new LayerFeatureRecord();
             record.setId(rs.getObject(metadata.primaryKeyColumn()));
-            record.setGeometryGeoJson(rs.getString("geometry_geo_json"));
+            record.setGeometryEwkb(rs.getBytes("geometry_ewkb"));
 
             for (String column : metadata.sourceNonGeometryColumnNames()) {
                 String udt = udtByColumn.get(column);

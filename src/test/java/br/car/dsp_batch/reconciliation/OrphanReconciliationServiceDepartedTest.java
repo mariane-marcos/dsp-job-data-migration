@@ -6,6 +6,7 @@ import br.car.dsp_batch.layer.introspection.SchemaIntrospectionService;
 import br.car.dsp_batch.layer.metadata.QualifiedTable;
 import br.car.dsp_batch.sync.DepartedLevel3ContextSupport;
 import br.car.dsp_batch.sync.SyncKeys;
+import br.car.dsp_batch.sync.WatermarkContextKeys;
 import br.car.dsp_batch.sync.WatermarkTableSpec;
 import br.car.dsp_batch.temporal.TemporalTestFixtures;
 import org.junit.jupiter.api.Test;
@@ -16,7 +17,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,7 +57,7 @@ class OrphanReconciliationServiceDepartedTest {
                 businessTargetJdbc,
                 areaOfInterestSpec(),
                 List.of("100"),
-                Map.of("100", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         assertEquals(Set.of("l3-a"), DepartedLevel3ContextSupport.read(jobExecution.getExecutionContext()));
@@ -100,7 +100,7 @@ class OrphanReconciliationServiceDepartedTest {
                 businessTargetJdbc,
                 areaOfInterestSpec(),
                 List.of("73"),
-                Map.of("73", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         InOrder order = inOrder(businessTargetJdbc, geoTargetJdbc);
@@ -138,14 +138,14 @@ class OrphanReconciliationServiceDepartedTest {
                 businessTargetJdbc,
                 areaOfInterestSpec(),
                 List.of("73"),
-                Map.of("73", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext()));
         service.reconcileOrphans(
                 geoTargetJdbc,
                 businessTargetJdbc,
                 areaOfInterestSpec(),
                 List.of("73"),
-                Map.of("73", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         verify(businessTargetJdbc, times(2)).update(
@@ -194,7 +194,7 @@ class OrphanReconciliationServiceDepartedTest {
                 null,
                 spec,
                 List.of("layer-1"),
-                Map.of("layer-1", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         assertEquals(Set.of("l3-layer"), DepartedLevel3ContextSupport.read(jobExecution.getExecutionContext()));
@@ -239,12 +239,35 @@ class OrphanReconciliationServiceDepartedTest {
                 null,
                 spec,
                 List.of("100"),
-                Map.of("100", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         assertEquals(Set.of(), DepartedLevel3ContextSupport.read(jobExecution.getExecutionContext()));
         verify(geoTargetJdbc, never()).query(
                 anyString(), any(RowCallbackHandler.class), any(Object[].class));
+    }
+
+    @Test
+    void reconcileOrphans_UnionsOrphanExtentWithDelta() {
+        JdbcTemplate geoTargetJdbc = mock(JdbcTemplate.class);
+        when(geoTargetJdbc.update(anyString(), any(Object[].class))).thenReturn(1);
+        OrphanReconciliationService service = new OrphanReconciliationService(properties);
+
+        JobExecution jobExecution = new JobExecution(6L);
+        jobExecution.getExecutionContext().putString(
+                WatermarkContextKeys.AFFECTED_EXTENT,
+                "0.000000,0.000000,1.000000,1.000000");
+        service.reconcileOrphans(
+                geoTargetJdbc,
+                null,
+                areaOfInterestSpec(),
+                List.of("100"),
+                "2.000000,0.000000,3.000000,1.000000",
+                jobExecution.getExecutionContext());
+
+        assertEquals(
+                "0.000000,0.000000,3.000000,1.000000",
+                jobExecution.getExecutionContext().getString(WatermarkContextKeys.AFFECTED_EXTENT));
     }
 
     @Test
@@ -270,7 +293,7 @@ class OrphanReconciliationServiceDepartedTest {
                 businessTargetJdbc,
                 areaOfInterestSpec(),
                 List.of(73),
-                Map.of("73", "0,0,1,1"),
+                "0.000000,0.000000,1.000000,1.000000",
                 jobExecution.getExecutionContext());
 
         verify(businessTargetJdbc).update(

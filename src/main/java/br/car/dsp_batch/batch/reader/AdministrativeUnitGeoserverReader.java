@@ -87,8 +87,8 @@ public class AdministrativeUnitGeoserverReader
         PostgresPagingQueryProvider queryProvider = new PostgresPagingQueryProvider();
         queryProvider.setSelectClause(
                 "SELECT " + selectColumns
-                        + ", " + GeometrySql.asGeoJsonText2d(transformedGeom)
-                        + " AS geometry_geo_json"
+                        + ", " + GeometrySql.asEwkb2d(transformedGeom)
+                        + " AS geometry_ewkb"
         );
         queryProvider.setFromClause("FROM " + tableConfig.getSourceTable());
 
@@ -145,7 +145,7 @@ public class AdministrativeUnitGeoserverReader
         public AdministrativeUnitDTO mapRow(ResultSet rs, int rowNum) throws SQLException {
             AdministrativeUnitDTO dto = new AdministrativeUnitDTO();
             dto.setId(rs.getObject(tableConfig.getPrimaryKey()));
-            dto.setGeometryGeoJson(rs.getString("geometry_geo_json"));
+            dto.setGeometryEwkb(rs.getBytes("geometry_ewkb"));
 
             ResultSetMetaData meta = rs.getMetaData();
             Map<String, String> udtByLabel = new HashMap<>();

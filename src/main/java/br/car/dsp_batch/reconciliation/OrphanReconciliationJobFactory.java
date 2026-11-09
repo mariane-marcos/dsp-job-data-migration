@@ -1,6 +1,8 @@
 package br.car.dsp_batch.reconciliation;
 
+import br.car.dsp_batch.batch.listener.GeoCacheUpdateListener;
 import br.car.dsp_batch.geofile.GeoFileRegenerationFlagListener;
+import br.car.dsp_batch.sync.CycleAffectedExtent;
 import br.car.dsp_batch.reconciliation.partitioner.GeoTargetReconciliationPartitioner;
 import br.car.dsp_batch.reconciliation.tasklet.OrphanReconciliationWorkerTasklet;
 import br.car.dsp_batch.reconciliation.tasklet.ReconciliationSetupTasklet;
@@ -28,6 +30,8 @@ public class OrphanReconciliationJobFactory {
     private final ReconciliationEmptyTargetDecider emptyTargetDecider;
     private final ReconciliationCommitListener reconciliationCommitListener;
     private final GeoFileRegenerationFlagListener geoFileRegenerationFlagListener;
+    private final GeoCacheUpdateListener geoCacheUpdateListener;
+    private final CycleAffectedExtent cycleAffectedExtent;
     private final OrphanReconciliationService reconciliationService;
     private final OrphanOriginProbe originProbe;
     private final TaskExecutor reconciliationTaskExecutor;
@@ -37,6 +41,8 @@ public class OrphanReconciliationJobFactory {
             ReconciliationEmptyTargetDecider emptyTargetDecider,
             ReconciliationCommitListener reconciliationCommitListener,
             GeoFileRegenerationFlagListener geoFileRegenerationFlagListener,
+            GeoCacheUpdateListener geoCacheUpdateListener,
+            CycleAffectedExtent cycleAffectedExtent,
             OrphanReconciliationService reconciliationService,
             OrphanOriginProbe originProbe,
             @org.springframework.beans.factory.annotation.Qualifier("reconciliationTaskExecutor")
@@ -45,6 +51,8 @@ public class OrphanReconciliationJobFactory {
         this.emptyTargetDecider = emptyTargetDecider;
         this.reconciliationCommitListener = reconciliationCommitListener;
         this.geoFileRegenerationFlagListener = geoFileRegenerationFlagListener;
+        this.geoCacheUpdateListener = geoCacheUpdateListener;
+        this.cycleAffectedExtent = cycleAffectedExtent;
         this.reconciliationService = reconciliationService;
         this.originProbe = originProbe;
         this.reconciliationTaskExecutor = reconciliationTaskExecutor;
@@ -79,6 +87,7 @@ public class OrphanReconciliationJobFactory {
                 .end()
                 .listener(reconciliationCommitListener)
                 .listener(geoFileRegenerationFlagListener)
+                .listener(geoCacheUpdateListener)
                 .build();
     }
 
@@ -90,7 +99,8 @@ public class OrphanReconciliationJobFactory {
         Tasklet tasklet = new ReconciliationSetupTasklet(
                 new JdbcTemplate(geoTargetDataSource),
                 spec,
-                properties);
+                properties,
+                cycleAffectedExtent);
         return new StepBuilder(stepPrefix + "ReconciliationSetupStep", jobRepository)
                 .tasklet(tasklet, transactionManager)
                 .build();

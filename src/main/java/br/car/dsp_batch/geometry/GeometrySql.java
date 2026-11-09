@@ -55,23 +55,42 @@ public final class GeometrySql {
     }
 
     /**
-     * GeoJSON text of a 2D geometry (Z/M dropped).
+     * EWKB of a 2D geometry (Z/M dropped). The transform that sets the SRID stays outside.
      */
-    public static String asGeoJsonText2d(String geometryExpression) {
-        return "public.ST_AsGeoJSON(" + force2d(geometryExpression) + ")::text";
+    public static String asEwkb2d(String geometryExpression) {
+        return "public.ST_AsEWKB(" + force2d(geometryExpression) + ")";
     }
 
     /**
-     * Placeholder expression for UPSERT: GeoJSON param → 2D geometry with SRID.
+     * Geometry in EPSG:3857. Source SRID is applied before the transform.
      */
-    public static String geomFromGeoJsonParam2d(int srid) {
-        if (srid <= 0) {
+    public static String inWebMercator(String geometryExpression, int sourceSrid) {
+        requireGeometryExpression(geometryExpression);
+        if (sourceSrid <= 0) {
             throw new IllegalArgumentException("srid must be a positive integer");
         }
-        return String.format(
-                "public.ST_SetSRID(public.ST_Force2D(public.ST_GeomFromGeoJSON(?)), %d)",
-                srid
-        );
+        return transform(
+                "ST_SetSRID(" + force2d(geometryExpression) + ", " + sourceSrid + ")",
+                3857);
+    }
+
+    /** Placeholder: EWKB bind, SRID already inside the bytes. */
+    public static String geomFromEwkbParam() {
+        return "public.ST_GeomFromEWKB(?)";
+    }
+
+    /** Same bind, wrapped so a Polygon fits a MultiPolygon column. */
+    public static String multiGeomFromEwkbParam() {
+        return "public.ST_Multi(" + geomFromEwkbParam() + ")";
+    }
+
+    /**
+     * Envelope and centroid from one EWKB bind.
+     * Fits {@code INSERT INTO t (cols) SELECT <placeholders>, <this> ON CONFLICT ...}.
+     */
+    public static String envelopeAndCentroidFromEwkb() {
+        return "public.ST_Envelope(g), public.ST_Centroid(g) FROM (SELECT "
+                + geomFromEwkbParam() + " AS g) ewkb";
     }
 
     private static void requireGeometryExpression(String geometryExpression) {

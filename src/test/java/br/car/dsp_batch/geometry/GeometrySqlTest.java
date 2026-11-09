@@ -59,25 +59,42 @@ class GeometrySqlTest {
     }
 
     @Test
-    void asGeoJsonText2d_Forces2dBeforeGeoJson() {
-        String sql = GeometrySql.asGeoJsonText2d("geom");
+    void asEwkb2d_Forces2dBeforeEwkb() {
+        String sql = GeometrySql.asEwkb2d("geom");
 
-        assertEquals("public.ST_AsGeoJSON(ST_Force2D(geom))::text", sql);
+        assertEquals("public.ST_AsEWKB(ST_Force2D(geom))", sql);
         assertTrue(sql.contains("ST_Force2D"));
     }
 
     @Test
-    void geomFromGeoJsonParam2d_Forces2dOnInsert() {
-        String sql = GeometrySql.geomFromGeoJsonParam2d(4674);
-
+    void inWebMercator_SetsSourceSridThenTransforms() {
         assertEquals(
-                "public.ST_SetSRID(public.ST_Force2D(public.ST_GeomFromGeoJSON(?)), 4674)",
-                sql
+                "public.ST_Transform(ST_SetSRID(ST_Force2D(geom), 4674), 3857)",
+                GeometrySql.inWebMercator("geom", 4674)
         );
     }
 
     @Test
-    void geomFromGeoJsonParam2d_RejectsInvalidSrid() {
-        assertThrows(IllegalArgumentException.class, () -> GeometrySql.geomFromGeoJsonParam2d(0));
+    void inWebMercator_RejectsInvalidSrid() {
+        assertThrows(IllegalArgumentException.class, () -> GeometrySql.inWebMercator("geom", 0));
+    }
+
+    @Test
+    void multiGeomFromEwkbParam_WrapsSingleBind() {
+        assertEquals(
+                "public.ST_Multi(public.ST_GeomFromEWKB(?))",
+                GeometrySql.multiGeomFromEwkbParam()
+        );
+    }
+
+    @Test
+    void envelopeAndCentroidFromEwkb_UsesOneBind() {
+        String sql = GeometrySql.envelopeAndCentroidFromEwkb();
+
+        assertEquals(
+                "public.ST_Envelope(g), public.ST_Centroid(g) FROM (SELECT public.ST_GeomFromEWKB(?) AS g) ewkb",
+                sql
+        );
+        assertFalse(sql.contains("ST_GeomFromGeoJSON"));
     }
 }

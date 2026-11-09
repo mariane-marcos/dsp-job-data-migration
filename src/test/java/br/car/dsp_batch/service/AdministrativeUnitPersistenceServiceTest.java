@@ -5,6 +5,7 @@ import br.car.dsp_batch.batch.dto.AdministrativeUnitDTO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -78,6 +79,29 @@ class AdministrativeUnitPersistenceServiceTest {
         verify(target, times(1)).batchUpdate(anyString(), anyList(), anyInt(), any());
     }
 
+    @Test
+    void upsertAll_WritesEwkbOnceAndMultipliesGeoTarget() {
+        JdbcTemplate target = mock(JdbcTemplate.class);
+        JdbcTemplate geoTarget = mock(JdbcTemplate.class);
+        AdministrativeUnitPersistenceService service =
+                new AdministrativeUnitPersistenceService(target, geoTarget);
+
+        AdministrativeUnitTableProperties config = baseConfig();
+        config.setSrid(4674);
+        service.upsertAll(List.of(sampleItem()), config);
+
+        ArgumentCaptor<String> businessSql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> geoSql = ArgumentCaptor.forClass(String.class);
+        verify(target).batchUpdate(businessSql.capture(), anyList(), anyInt(), any());
+        verify(geoTarget).batchUpdate(geoSql.capture(), anyList(), anyInt(), any());
+
+        assertTrue(businessSql.getValue().contains(
+                "public.ST_Envelope(g), public.ST_Centroid(g) FROM (SELECT public.ST_GeomFromEWKB(?) AS g) ewkb"));
+        assertTrue(geoSql.getValue().contains("public.ST_Multi(public.ST_GeomFromEWKB(?))"));
+        assertTrue(!businessSql.getValue().contains("ST_GeomFromGeoJSON"));
+        assertTrue(!geoSql.getValue().contains("ST_GeomFromGeoJSON"));
+    }
+
     private static AdministrativeUnitTableProperties baseConfig() {
         AdministrativeUnitTableProperties config = new AdministrativeUnitTableProperties();
         config.setSourceTable("source.unit");
@@ -93,7 +117,7 @@ class AdministrativeUnitPersistenceServiceTest {
     private static AdministrativeUnitDTO sampleItem() {
         AdministrativeUnitDTO dto = new AdministrativeUnitDTO();
         dto.setId("1");
-        dto.setGeometryGeoJson("{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}");
+        dto.setGeometryEwkb(new byte[] {1, 2, 3});
         dto.putAttribute("id", "1");
         dto.putAttribute("name", "Unit");
         return dto;

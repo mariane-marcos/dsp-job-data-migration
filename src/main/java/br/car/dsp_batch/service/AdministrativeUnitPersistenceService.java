@@ -58,7 +58,7 @@ public class AdministrativeUnitPersistenceService {
         List<AdministrativeUnitDTO> validItems = new ArrayList<>();
         int skippedWithoutGeometry = 0;
         for (AdministrativeUnitDTO item : items) {
-            if (item.getGeometryGeoJson() != null && !item.getGeometryGeoJson().isBlank()) {
+            if (item.getGeometryEwkb() != null && item.getGeometryEwkb().length > 0) {
                 validItems.add(item);
             } else {
                 skippedWithoutGeometry++;
@@ -94,7 +94,6 @@ public class AdministrativeUnitPersistenceService {
                 .map(tableConfig::resolveTargetColumn)
                 .collect(Collectors.toList());
         String targetPk = tableConfig.resolveTargetColumn(tableConfig.getPrimaryKey());
-        int srid = tableConfig.getSrid();
 
         String insertColumns = String.join(", ", targetColumns)
                 + ", " + BOUNDARY_BOX_COLUMN
@@ -102,9 +101,6 @@ public class AdministrativeUnitPersistenceService {
         String placeholders = sourceColumns.stream()
                 .map(c -> "?")
                 .collect(Collectors.joining(", "));
-        String geomExpr = GeometrySql.geomFromGeoJsonParam2d(srid);
-        String boundaryPlaceholder = "public.ST_Envelope(" + geomExpr + ")";
-        String centroidPlaceholder = "public.ST_Centroid(" + geomExpr + ")";
 
         String updateSet = targetColumns.stream()
                 .filter(col -> !col.equals(targetPk))
@@ -115,12 +111,11 @@ public class AdministrativeUnitPersistenceService {
         updateSet = updateSet.isEmpty() ? geoUpdate : updateSet + ", " + geoUpdate;
 
         String sql = String.format(
-                "INSERT INTO %s (%s) VALUES (%s, %s, %s) ON CONFLICT (%s) DO UPDATE SET %s",
+                "INSERT INTO %s (%s) SELECT %s, %s ON CONFLICT (%s) DO UPDATE SET %s",
                 tableConfig.getTargetTable(),
                 insertColumns,
                 placeholders,
-                boundaryPlaceholder,
-                centroidPlaceholder,
+                GeometrySql.envelopeAndCentroidFromEwkb(),
                 targetPk,
                 updateSet
         );
@@ -131,8 +126,7 @@ public class AdministrativeUnitPersistenceService {
                 for (String column : sourceColumns) {
                     index = bindAttribute(ps, index, item, column, tableConfig, temporalColumns);
                 }
-                ps.setString(index++, item.getGeometryGeoJson());
-                ps.setString(index, item.getGeometryGeoJson());
+                ps.setBytes(index, item.getGeometryEwkb());
             });
         } catch (DataAccessException e) {
             log.error("Critical failure during business-target UPSERT for {}",
@@ -153,13 +147,12 @@ public class AdministrativeUnitPersistenceService {
                 .collect(Collectors.toList());
         String targetGeom = tableConfig.resolveTargetColumn(tableConfig.getGeometryColumn());
         String targetPk = tableConfig.resolveTargetColumn(tableConfig.getPrimaryKey());
-        int srid = tableConfig.getSrid();
 
         String insertColumns = String.join(", ", targetColumns) + ", " + targetGeom;
         String placeholders = sourceColumns.stream()
                 .map(c -> "?")
                 .collect(Collectors.joining(", "));
-        String geometryPlaceholder = GeometrySql.geomFromGeoJsonParam2d(srid);
+        String geometryPlaceholder = GeometrySql.multiGeomFromEwkbParam();
 
         String updateSet = targetColumns.stream()
                 .filter(col -> !col.equals(targetPk))
@@ -185,7 +178,7 @@ public class AdministrativeUnitPersistenceService {
                 for (String column : sourceColumns) {
                     index = bindAttribute(ps, index, item, column, tableConfig, temporalColumns);
                 }
-                ps.setString(index, item.getGeometryGeoJson());
+                ps.setBytes(index, item.getGeometryEwkb());
             });
         } catch (DataAccessException e) {
             log.error("Critical failure during geo-target UPSERT for {}",

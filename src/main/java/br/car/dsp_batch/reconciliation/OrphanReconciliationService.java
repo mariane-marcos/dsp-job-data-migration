@@ -6,6 +6,7 @@ import br.car.dsp_batch.layer.config.LayerConfig;
 import br.car.dsp_batch.layer.config.LayersProperties;
 import br.car.dsp_batch.layer.introspection.SchemaIntrospectionService;
 import br.car.dsp_batch.layer.metadata.QualifiedTable;
+import br.car.dsp_batch.sync.AffectedExtent;
 import br.car.dsp_batch.sync.DepartedLevel3ContextSupport;
 import br.car.dsp_batch.sync.SyncKeys;
 import br.car.dsp_batch.sync.WatermarkContextKeys;
@@ -20,8 +21,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -50,27 +49,20 @@ public class OrphanReconciliationService {
     }
 
     /**
-     * Removes orphan PKs and merges affected bboxes into the job context.
-     *
-     * @return bbox strings for the deleted rows in this batch
+     * Removes orphan PKs and unions {@code orphanExtent} into the job's single extent.
      */
-    public List<String> reconcileOrphans(JdbcTemplate geoTargetJdbc,
-                                         JdbcTemplate businessTargetJdbc,
-                                         WatermarkTableSpec spec,
-                                         Collection<?> orphanIds,
-                                         Map<Object, String> bboxesById,
-                                         ExecutionContext jobContext) {
+    public void reconcileOrphans(JdbcTemplate geoTargetJdbc,
+                                 JdbcTemplate businessTargetJdbc,
+                                 WatermarkTableSpec spec,
+                                 Collection<?> orphanIds,
+                                 String orphanExtent,
+                                 ExecutionContext jobContext) {
         if (orphanIds == null || orphanIds.isEmpty()) {
-            return List.of();
+            return;
         }
 
         Set<Object> orphans = new HashSet<>(orphanIds);
-        List<String> orphanBboxes = new ArrayList<>();
         for (Object id : orphans) {
-            String bbox = bboxesById.get(normalizeId(id));
-            if (bbox != null) {
-                orphanBboxes.add(bbox);
-            }
             log.warn("DELETED orphan: id={}", id);
         }
 
@@ -89,8 +81,7 @@ public class OrphanReconciliationService {
         deleteRemovedRecordsInBatches(
                 geoTargetJdbc, spec.geoTargetTable(), spec.geoTargetPrimaryKey(), orphans);
 
-        mergeAffectedBboxes(jobContext, orphanBboxes, spec.layerName());
-        return orphanBboxes;
+        mergeExtent(jobContext, orphanExtent, spec.layerName());
     }
 
     public Object normalizeId(Object id) {
@@ -107,22 +98,20 @@ public class OrphanReconciliationService {
         return ReconciliationPrimaryKeySql.bindNormalized(ids, this::normalizeId);
     }
 
-    private void mergeAffectedBboxes(ExecutionContext jobContext,
-                                     List<String> orphanBboxes,
-                                     String layerName) {
-        if (orphanBboxes.isEmpty()) {
+    private void mergeExtent(ExecutionContext jobContext, String orphanExtent, String layerName) {
+        if (orphanExtent == null || orphanExtent.isBlank()) {
             return;
         }
-        @SuppressWarnings("unchecked")
-        List<String> existing = (List<String>) jobContext.get(WatermarkContextKeys.AFFECTED_BBOXES);
-        List<String> merged = new ArrayList<>();
-        if (existing != null) {
-            merged.addAll(existing);
-        }
-        merged.addAll(orphanBboxes);
-        jobContext.put(WatermarkContextKeys.AFFECTED_BBOXES, merged);
-        if (layerName != null && !layerName.isBlank()) {
-            jobContext.putString(WatermarkContextKeys.LAYER_NAME, layerName);
+        synchronized (jobContext) {
+            String existing = jobContext.containsKey(WatermarkContextKeys.AFFECTED_EXTENT)
+                    ? jobContext.getString(WatermarkContextKeys.AFFECTED_EXTENT)
+                    : null;
+            jobContext.putString(
+                    WatermarkContextKeys.AFFECTED_EXTENT,
+                    AffectedExtent.union(existing, orphanExtent));
+            if (layerName != null && !layerName.isBlank()) {
+                jobContext.putString(WatermarkContextKeys.LAYER_NAME, layerName);
+            }
         }
     }
 
@@ -300,7 +289,4 @@ public class OrphanReconciliationService {
         return batches;
     }
 
-    static String formatBbox(double minX, double minY, double maxX, double maxY) {
-        return String.format(Locale.US, "%.6f,%.6f,%.6f,%.6f", minX, minY, maxX, maxY);
-    }
 }

@@ -15,9 +15,7 @@ import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Slf4j
@@ -85,20 +83,12 @@ public class OrphanReconciliationWorkerTasklet implements Tasklet {
             }
 
             if (!orphanIds.isEmpty()) {
-                Map<String, String> fetched = reader.fetchBboxes(orphanIds);
-                Map<Object, String> bboxesById = new HashMap<>();
-                for (String rawId : orphanIds) {
-                    String bbox = fetched.get(rawId);
-                    if (bbox != null) {
-                        bboxesById.put(reconciliationService.normalizeId(rawId), bbox);
-                    }
-                }
                 reconciliationService.reconcileOrphans(
                         geoTargetJdbc,
                         businessTargetJdbc,
                         spec,
                         orphanIds,
-                        bboxesById,
+                        reader.fetchExtent(orphanIds),
                         jobContext);
                 totalOrphans += orphanIds.size();
             }

@@ -49,7 +49,7 @@ public class LayerFeaturePersistenceService {
         List<LayerFeatureRecord> validItems = new ArrayList<>();
         int skippedWithoutGeometry = 0;
         for (LayerFeatureRecord item : items) {
-            if (item.getGeometryGeoJson() != null && !item.getGeometryGeoJson().isBlank()) {
+            if (item.getGeometryEwkb() != null && item.getGeometryEwkb().length > 0) {
                 validItems.add(item);
             } else {
                 skippedWithoutGeometry++;
@@ -79,7 +79,6 @@ public class LayerFeaturePersistenceService {
         List<String> targetColumns = metadata.targetNonGeometryColumnNames();
         String targetPk = metadata.resolveTargetPrimaryKeyColumn();
         String geom = metadata.resolveTargetGeometryColumn();
-        int srid = metadata.srid();
 
         Map<String, String> udtBySource = new HashMap<>();
         for (ColumnMetadata column : metadata.columns()) {
@@ -88,7 +87,7 @@ public class LayerFeaturePersistenceService {
 
         String insertColumns = String.join(", ", targetColumns) + ", " + geom;
         String placeholders = targetColumns.stream().map(c -> "?").collect(Collectors.joining(", "));
-        String geometryPlaceholder = GeometrySql.geomFromGeoJsonParam2d(srid);
+        String geometryPlaceholder = GeometrySql.geomFromEwkbParam();
 
         String updateSet = targetColumns.stream()
                 .filter(col -> !col.equals(targetPk))
@@ -135,7 +134,7 @@ public class LayerFeaturePersistenceService {
                         }
                     }
                 }
-                ps.setString(index, item.getGeometryGeoJson());
+                ps.setBytes(index, item.getGeometryEwkb());
             });
         } catch (DataAccessException e) {
             log.error("Critical failure during geo-target UPSERT for {}",

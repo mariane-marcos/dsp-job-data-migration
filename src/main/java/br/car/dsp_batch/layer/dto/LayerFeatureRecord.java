@@ -16,7 +16,7 @@ import java.util.Map;
 public class LayerFeatureRecord {
 
     private Object id;
-    private String geometryGeoJson;
+    private byte[] geometryEwkb;
     private Map<String, Object> attributes = new LinkedHashMap<>();
 
     public Object getAttribute(String column) {

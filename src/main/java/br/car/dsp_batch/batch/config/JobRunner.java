@@ -105,6 +105,7 @@ public class JobRunner implements CommandLineRunner {
                     step.getCommitCount()
             );
         }
+        JobRunGuard.requireCompleted(job.getName(), execution);
     }
 
     private static String enabledLabel(boolean enabled) {
